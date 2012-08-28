@@ -1,0 +1,31 @@
+
+include httpretrieve.repy
+
+
+
+
+
+
+
+
+
+
+
+if callfunc == "initialize":
+
+   # easy
+   #page = httpretrieve_open('http://localhost', timeout=1)
+   
+   # Redirection!
+   page = httpretrieve_open('http://google.com', timeout=1)
+
+   # Redirection?
+   #page = httpretrieve_open('http://en.wikipedia.org/wiki/Jon_Gooch', timeout=1)
+
+   # Crazy shit
+   #page = httpretrieve_open('http://www.feedme.uk.com/', timeout=1)
+
+   
+   print page.read()
+
+
