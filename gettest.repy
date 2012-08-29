@@ -2,30 +2,52 @@
 include httpretrieve.repy
 
 
+def _sendmsg(sockobj, msg):
+   """ """
+   while len(msg) > 0:
+      bytessent = sockobj.send(msg)
+      content = msg[bytessent:]      
 
 
+def _sendheader(sockobj, length):
+   """ """
+   _sendmsg(sockobj, "vpts{length="+str(length)+"}vpts")
 
 
+def sendmsg(sockobj, msg):
+   """ """
+   _sendheader(sockobj, len(msg))
+   _sendmsg(sockobj, msg)
+   
 
 
+def performget(sockobj):
+   """ """
+
+   getpage = sockobj.recv(4096)
+
+   getpage = getpage.strip()
+   print "getting page", getpage
+
+   page = httpretrieve_open(getpage, timeout=1)
+   content = page.read()
+
+   print "sending", len(content), "byte page back"
+
+   sendmsg(content)
 
 
 
 if callfunc == "initialize":
 
-   # easy
-   #page = httpretrieve_open('http://localhost', timeout=1)
-   
-   # Redirection!
-   page = httpretrieve_open('http://google.com', timeout=1)
+   if len(callargs) < 2:
+      print "Usage <hostip> <hostport>"
+      exit 1
 
-   # Redirection?
-   #page = httpretrieve_open('http://en.wikipedia.org/wiki/Jon_Gooch', timeout=1)
+   hostip = callargs[0]
+   hostport = callargs[1]
 
-   # Crazy shit
-   #page = httpretrieve_open('http://www.feedme.uk.com/', timeout=1)
-
-   
-   print page.read()
-
+   sockobj = openconn(hostip, int(hostport))
+   performget(sockobj)
+   sockobj.close()
 

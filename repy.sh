@@ -6,13 +6,15 @@ restrpath="./restrictions.test"
 torun="out.repy"
 
 toprep=${1}
+shift
 
+args=${@}
 
 printf "Combining src into ${torun} ..."
 if python ${repypreppath} ${toprep} ${torun}; then
 
     printf " Complete\nRunning repy\n"
-    python ${repypath} ${restrpath} ${torun}
+    python ${repypath} ${restrpath} ${torun} ${args}
     printf "\nRepy exited with status ${?}\n"
 
 else
