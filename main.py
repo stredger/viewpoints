@@ -5,6 +5,19 @@ import difflib
 import select
 import os
 import threading
+import getloc
+
+# this aint workin!
+#
+# cwd = os.getcwd()
+# repypath = os.path.join(cwd, "repylib")
+# try:
+#     path = os.environ['PYTHONPATH']
+#     os.environ['PYTHONPATH'] = "%s:%s" % (repypath, path)
+# except KeyError:
+#     os.environ['PYTHONPATH'] = repypath
+
+import overlord
 
 # constants
 MAX_LISTEN_QUEUE = 10
@@ -25,11 +38,11 @@ connlist_lock = threading.Lock()
 vptlist = []
 vptlist_lock = threading.Lock()
 
+# dict of location: viewpoint[]
+locations = {}
+locations_lock = threading.Lock()
 
 
-class UsageException(Exception):
-    """ Exception for incorrect usage of the program """
-    None
 
 class ViewpointException(Exception):
     """ """
@@ -70,10 +83,37 @@ class connection():
 
 
 
+def _sendmsg(sockobj, msg):
+    """ """
+    tosend = len(msg)
+    totbytes = 0
+    while len(msg) > 0:
+       bytessent = sockobj.send(msg)
+       msg = msg[bytessent:]   
+       totbytes += bytessent
+
+    assert totbytes == tosend
+
+
+def _sendheader(sockobj, length):
+    """ """
+    msg = VPT_LHEADER+"length="+str(length)+VPT_RHEADER
+    _sendmsg(sockobj, msg)
+
+
+
+def sendmsg(sockobj, msg):
+    """ """
+    _sendheader(sockobj, len(msg))
+    _sendmsg(sockobj, msg)
+   
+
+
 def readheader(sock):
 
     chunk = sock.recv(READ_SIZE)
     head = chunk
+    # loop until we have the left and right portions of the header
     while VPT_RHEADER not in head and VPT_LHEADER not in head and len(chunk) > 0:
         chunk = sock.recv(READ_SIZE)
         head += chunk
@@ -82,51 +122,49 @@ def readheader(sock):
 
 
 
-def send_url(sock, url):
-    sock.send(url)
-
-
-
-def recv_page(sock):
+def recvmsg(sock):
 
     assert isinstance(sock, socket.socket)
 
     chunk = readheader(sock)
     headstoppos = chunk.find(VPT_RHEADER) + len(VPT_RHEADER)
     if headstoppos <= len(VPT_RHEADER):
-        raise ViewpointException("Failed to get header for page message")
+        raise ViewpointException("Failed to get header for message")
 
     head = chunk[:headstoppos]
-    page = chunk[headstoppos:]
+    msg = chunk[headstoppos:]
 
     # we want to isolate the value immediately after VPT_FIELDSEP
     #  and immediately before VPT_RHEADER
     try:
-        pagelen = int(head.split(VPT_FIELDSEP)[1].split(VPT_RHEADER)[0])
+        msglen = int(head.split(VPT_FIELDSEP)[1].split(VPT_RHEADER)[0])
     except ValueError as e:
-        raise ViewpointException("Failed to read header for page message: %s" % (e))
+        raise ViewpointException("Failed to read header for message: %s" % (e))
 
-    toread =  pagelen - (len(head) - headstoppos)
+    toread = msglen - (len(chunk) - headstoppos)
     while toread > 0 and len(chunk) > 0:
         chunk = sock.recv(READ_SIZE)
-        page += chunk
+        msg += chunk
         toread -= len(chunk)
 
-    assert len(page) == pagelen
+    assert len(msg) == msglen
 
-    return page
+    return msg
 
 
 
 def get_viewpoint(connection, url):
-    
-    try:
-        send_url(connection.socket, url)
-    
-        page = recv_page(connection.socket)
+    """ Threads start execution here """
 
-    # get location
-        location = ""
+    try:
+        sendmsg(connection.socket, url)
+        print "sent url %s to %s" % (url, connection.ip)
+
+        page = recvmsg(connection.socket)
+        print "recieved %s byte page from %s" % (len(page), connection.ip)
+
+        # get location
+        location = getloc.stringify_location(getloc.get_location(connection.ip))
 
         vpt = viewpoint(url, connection.ip, location, page)
 
@@ -151,6 +189,7 @@ def setup_listener(ip, port, max_queue):
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((ip, port))
     s.listen(max_queue)
+    print "Listening on port %s:%s" % (ip, str(port)) 
 
     assert(s)
     return s
@@ -256,7 +295,7 @@ def wait_for_conn(lsock, url):
 
 
 def usage():
-    print "main.py <ip> <port> <url>"
+    print "Usage: <ip> <port> <url>"
 
 
 
@@ -269,32 +308,51 @@ def close_all_connections():
         connlist_lock.release()
     
 
+
+def run_repy_clients(geniuser, ip, port):
+    
+    # get vesels
+    print "Acquiring repy vessels..."
+    repyvessels = overlord.Overlord(geniuser, 10, "wan", "out.repy", "repyvessel.log")
+    print "Complete"
+
+    # run on vessels
+    repyvessels.run(ip, port)
+
+
+
 def main():
 
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 4:
         #usage()
         #return 1
         print "For testing yall!!!!!!!"
+        sys.argv.append("stredger")
         sys.argv.append("142.104.69.48")
         sys.argv.append(35467)
-        sys.argv.append("http://localhost")
+        sys.argv.append("http://google.com")
 
+    geniuser = sys.argv[1]
+    thisip = sys.argv[2]
+    thisport = sys.argv[3]
+    urltoview = sys.argv[4]
 
-    thisip = sys.argv[1]
-    thisport = sys.argv[2]
-    urltoview = sys.argv[3]
+    repythread = threading.Thread(target=run_repy_clients, args=[geniuser, thisip, thisport])
+    repythread.start()
 
     sock = setup_listener(thisip, thisport, MAX_LISTEN_QUEUE)
+    listenthread = threading.Thread(target=wait_for_conn, args=[sock, urltoview])
+    #wait_for_conn(sock, urltoview)
+
     
-    wait_for_conn(sock, urltoview)
 
     sock.close()
-
     join_all_threads()
     close_all_connections()
+    # TODO: terminate repy thread!!
     
     for vpt in vptlist:
-        print "view from %s at %s" % (vpt.location, vpt.ip)
+        print "view from %s at %s" % (str(vpt.location), vpt.ip)
         print vpt.page
 
 

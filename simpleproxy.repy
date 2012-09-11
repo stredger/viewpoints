@@ -1,0 +1,156 @@
+
+include httpretrieve.repy
+
+# globals
+mycontext['read_size'] = 4096
+mycontext['vpt_lheader'] = 'vpts{'
+mycontext['vpt_rheader'] = '}vpts'
+mycontext['vpt_fieldsep'] = '='
+
+
+
+class UsageException(Exception):
+    """ """
+    None
+
+
+class ViewpointException(Exception):
+    """ """
+    None
+
+
+def _sendmsg(sockobj, msg):
+    """ """
+    tosend = len(msg)
+    totbytes = 0
+    while len(msg) > 0:
+       bytessent = sockobj.send(msg)
+       msg = msg[bytessent:]   
+       totbytes += bytessent
+
+    assert totbytes == tosend   
+
+
+def _sendheader(sockobj, length):
+    """ """
+    msg = mycontext['vpt_lheader']+"length="+str(length)+mycontext['vpt_rheader']
+    _sendmsg(sockobj, msg)
+
+
+def sendmsg(sockobj, msg):
+    """ """
+    _sendheader(sockobj, len(msg))
+    _sendmsg(sockobj, msg)
+   
+
+
+def _getheader(sock):
+    """ """
+
+    chunk = sock.recv(mycontext['read_size'])
+    print "HEADKER chunk", chunk
+    head = chunk
+    while mycontext['vpt_rheader'] not in head and mycontext['vpt_lheader'] not in head and len(chunk) > 0:
+       chunk = sock.recv(mycontext['read_size'])
+       head += chunk
+
+    return head
+
+
+
+def getmsg(sock):
+    """ """
+   
+    assert sock
+
+    chunk = _getheader(sock)
+    headstoppos = chunk.find(mycontext['vpt_rheader']) + len(mycontext['vpt_rheader'])
+    if headstoppos <= len(mycontext['vpt_rheader']):
+        raise ViewpointException("Failed to get header for message")
+
+    head = chunk[:headstoppos]
+    msg = chunk[headstoppos:]
+
+    # we want to isolate the value immediately after mycontext['vpt_fieldsep']
+    #  and immediately before mycontext['vpt_rheader']
+    try:
+        msglen = int(head.split(mycontext['vpt_fieldsep'])[1].split(mycontext['vpt_rheader'])[0])
+    except ValueError as e:
+        raise ViewpointException("Failed to read header for message: %s" % (e))
+
+    toread = msglen - (len(chunk) - headstoppos)
+
+    while toread > 0 and len(chunk) > 0:
+        chunk = sock.recv(mycontext['read_size'])
+        msg += chunk
+        toread -= len(chunk)
+
+    assert len(msg) == msglen
+
+    return msg
+
+
+
+def performget(sockobj, url):
+    """ """
+   
+    assert 'http://' in url, "Incorrect url format: %s" % (url)
+
+    page = httpretrieve_open(url)
+    content = page.read()
+    return content
+
+
+
+def connecttohost(ip, port, tries=3):
+    """ try to connect to the host multiple times """
+
+    sockobj = None
+    attempt = 0
+    while attempt < tries and not sockobj:
+        try:
+            # wait some amount of time prop to attempt no
+            sleep(attempt)
+            sockobj = openconn(ip, port)
+        except Exception as e:
+            print "Failed connect attempt %s: %s" % (attempt+1, e)
+            attempt+=1
+
+    if not sockobj:
+        # attempt not +1 as we increment after last failed attempt
+        raise ViewpointException("Failed to connect to host after %s attempts" % (attempt))
+
+    return sockobj
+            
+
+
+if callfunc == "initialize":
+
+    try:
+       if len(callargs) < 2:
+          raise UsageException("Usage: <hostip> <hostport>")
+
+       hostip = callargs[0]
+       hostport = callargs[1]
+
+       if len(hostip.split('.')) != 4:
+          raise UsageException("Invalid host ip address: %s" % (hostip))
+       try:
+          hostport = int(hostport)
+       except ValueError as e:
+          raise UsageException("Invalid host port: %s" % (hostport))
+
+       sockobj = connecttohost(hostip, hostport)
+       print "Connected to %s:%s" % (hostip, hostport)
+
+       url = getmsg(sockobj)
+       print "Url to get: %s" % (url)
+
+       page = performget(sockobj, url)
+       print "Sending %s byte page back" % (len(page))
+       sendmsg(sockobj, page)
+       sockobj.close()
+       print "Succesfully got viewpoint for %s" % (url)
+
+    except UsageException as e:
+        print e
